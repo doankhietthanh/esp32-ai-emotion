@@ -17,15 +17,17 @@
 #define SDA_PIN 14
 #define SCL_PIN 15
 
-#define VRx_PIN 12
-#define VRy_PIN 13
+#define VRx_PIN 0
+#define VRy_PIN 1
 #define SW_PIN 2
+
+#define BUTTON_PIN 16
 
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 #define SCREEN_ADDRESS 0x3C
 
-#define TOTAL_SCREEN 3
+#define TOTAL_SCREEN 5
 #define TOTAL_MESSAGE 3
 
 // typedef enum screen: main, message, local time
@@ -33,7 +35,9 @@ typedef enum
 {
     MAIN,
     MESSAGE,
-    LOCAL_TIME
+    LOCAL_TIME,
+    SET_ALARM,
+    RING_ALARM,
 } screenType;
 
 const char *SSID = "Nha Bat On";
@@ -55,6 +59,9 @@ String ip;
 String gateway;
 String dataWifi;
 
+uint8_t setHourAlarm = 0;
+uint8_t setMinuteAlarm = 5;
+
 const char *ssidPath = "/ssid.txt";
 const char *passPath = "/pass.txt";
 const char *ipPath = "/ip.txt";
@@ -68,6 +75,7 @@ void initDateTime();
 void initOLed();
 void initSPIFFS();
 void startWifiAP();
+void IRAM_ATTR setupWifiHandler();
 
 void drawIconWifi(uint8_t x, uint8_t y);
 void drawIconAlarm(uint8_t x, uint8_t y);
@@ -77,10 +85,13 @@ void drawTimeSmall(uint8_t x, uint8_t y);
 void displayMain();
 void displayWeather();
 void displayMessage();
+void displaySetAlarm();
+void displayRingAlarm();
 
 void updateScreen();
 void updateTime();
 void reCheckWifi();
+void setupAlarmCheck();
 
 String readFile(fs::FS &fs, const char *path);
 void writeFile(fs::FS &fs, const char *path, const char *message);
@@ -225,13 +236,9 @@ const char index_html[] PROGMEM = R"rawliteral(
                 <form action="/" method="POST">
                     <p>
                         <label for="ssid">SSID</label>
-                        <input type="text" id="ssid" name="ssid"><br>
+                        <input type="text" id="ssid" name="ssid" value="Nha Bat On"><br>
                         <label for="pass">Password</label>
-                        <input type="text" id="pass" name="pass"><br>
-                        <label for="ip">IP Address</label>
-                        <input type="text" id="ip" name="ip" value="192.168.1.200"><br>
-                        <label for="gateway">Gateway Address</label>
-                        <input type="text" id="gateway" name="gateway" value="192.168.1.1"><br>
+                        <input type="text" id="pass" name="pass" value="chochimancut"><br>
                         <input type="submit" value="Submit">
                     </p>
                 </form>
