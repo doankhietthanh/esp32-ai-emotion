@@ -39,7 +39,7 @@ ButtonState buttonReadState()
 
         if (pressDuration < SHORT_PRESS_TIME)
         {
-            return BUTTON_TYPE_SHORT;
+            return PRESSED_SHORT;
         }
     }
 
@@ -50,9 +50,9 @@ ButtonState buttonReadState()
         if (pressDuration > LONG_PRESS_TIME)
         {
             isLongDetected = true;
-            return BUTTON_TYPE_LONG;
+            return PRESSED_LONG;
         }
     }
 
-    return BUTTON_TYPE_NONE;
+    return PRESSED_NONE;
 }

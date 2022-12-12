@@ -4,6 +4,13 @@
 #include <Adafruit_ADS1x15.h>
 
 extern TwoWire i2cBus;
+extern bool listHasError[5];
+
+typedef enum
+{
+    JOYSTICK = 4,
+} ERROR_INIT;
+
 Adafruit_ADS1115 ads;
 JoystickPin joystick;
 
@@ -16,8 +23,7 @@ void joystickSetup(uint8_t VRxPin, uint8_t VRyPin, uint8_t SWPin)
     if (!ads.begin(0x48, &i2cBus))
     {
         Serial.println("ADS1115 not found");
-        while (1)
-            ;
+        listHasError[JOYSTICK] = true;
     }
 }
 void joystickLoop()
@@ -28,22 +34,22 @@ void joystickLoop()
 }
 JoystickAxisState joystickAxisReadState()
 {
-    JoystickAxisState state = JOYSTICK_TYPE_CENTER;
+    JoystickAxisState state = AXIS_CENTER;
     if (joystick.JoystickValue[0] < 5000)
     {
-        state = JOYSTICK_TYPE_LEFT;
+        state = AXIS_LEFT;
     }
     else if (joystick.JoystickValue[0] > 10000)
     {
-        state = JOYSTICK_TYPE_RIGHT;
+        state = AXIS_RIGHT;
     }
     else if (joystick.JoystickValue[1] < 5000)
     {
-        state = JOYSTICK_TYPE_UP;
+        state = AXIS_UP;
     }
     else if (joystick.JoystickValue[1] > 10000)
     {
-        state = JOYSTICK_TYPE_DOWN;
+        state = AXIS_DOWN;
     }
     return state;
 }

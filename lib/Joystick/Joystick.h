@@ -6,11 +6,11 @@
 
 typedef enum
 {
-    JOYSTICK_TYPE_CENTER = 0x00,
-    JOYSTICK_TYPE_UP = 0x01,
-    JOYSTICK_TYPE_DOWN = 0x02,
-    JOYSTICK_TYPE_LEFT = 0x03,
-    JOYSTICK_TYPE_RIGHT = 0x04,
+    AXIS_CENTER = 0x00,
+    AXIS_UP = 0x01,
+    AXIS_DOWN = 0x02,
+    AXIS_LEFT = 0x03,
+    AXIS_RIGHT = 0x04,
 } JoystickAxisState;
 
 typedef struct

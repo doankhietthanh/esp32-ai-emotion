@@ -11,8 +11,12 @@ IPAddress subnet(255, 255, 0, 0);
 
 struct tm timeinfo;
 unsigned long previousMillis = 0;
-const long interval = 10000; // interval to wait for Wi-Fi connection (milliseconds)
+unsigned long currentMillis = 0;
+const long timeAutoUpdateScreen = 15000;
 
+bool listHasError[5] = {0};
+
+uint8_t storeMessageChecked[TOTAL_MESSAGE] = {0};
 char bufferMsg[TOTAL_MESSAGE][SCREEN_WIDTH] = {
     "Hello world",
     "This is a message",
@@ -25,17 +29,21 @@ unsigned long lastTimeWifi = 0;
 bool dotClockState = false;
 bool setupWifiState = false;
 
-bool alarmCheck = true;
+bool alarmCheck = false;
 bool wifiCheck = false;
 bool lockScreenCheck = false;
 
-uint8_t screenIndex = 0;
-;
+int8_t screenIndex = 0;
+int8_t setAlarmIndex = 0;
+int8_t messageIndex = 0;
 
 void setup()
 {
     Serial.begin(BAUD_RATE);
     pinMode(BUTTON_PIN, INPUT_PULLUP);
+    pinMode(LED_PIN, OUTPUT);
+    digitalWrite(LED_PIN, LOW);
+
     initSPIFFS();
     initI2C();
     initOLed();
@@ -46,14 +54,16 @@ void setup()
     initRTC();
     initDateTime();
     joystickSetup(VRx_PIN, VRy_PIN, SW_PIN);
+    displayErrorInit();
 }
 
 void loop()
 {
     updateTime();
+    joystickLoop();
     updateScreen();
     reCheckWifi();
-    joystickLoop();
+    reCheckAlarm();
 }
 
 void initSPIFFS()
@@ -61,13 +71,15 @@ void initSPIFFS()
     if (!SPIFFS.begin(true))
     {
         Serial.println("An error has occurred while mounting SPIFFS");
+        listHasError[FS] = true;
     }
     Serial.println("SPIFFS mounted successfully");
 }
 
 void initI2C()
 {
-    i2cBus.begin(SDA_PIN, SCL_PIN, 400000);
+    if (!i2cBus.begin(SDA_PIN, SCL_PIN, 400000))
+        listHasError[I2C] = true;
 }
 
 void initOLed()
@@ -75,8 +87,7 @@ void initOLed()
     if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS))
     {
         Serial.println(F("SSD1306 allocation failed"));
-        for (;;)
-            ; // Don't proceed, loop forever
+        listHasError[OLED] = true;
     }
     else
     {
@@ -94,28 +105,33 @@ void initOLed()
 
 bool initWifi()
 {
+    ssid = SSID;
+    pass = PASS;
     display.clearDisplay();
     display.setTextColor(WHITE);
     display.setTextSize(1);
 
-    dataWifi = readFile(SPIFFS, "/wifi.txt");
-    Serial.println(dataWifi);
-    int countBreakData = 0;
-    for (int i = 0; i < dataWifi.length(); i++)
+    if (ssid == "" || pass == "")
     {
-        if (dataWifi[i] == '|')
+        dataWifi = readFile(SPIFFS, "/wifi.txt");
+        Serial.println(dataWifi);
+        int countBreakData = 0;
+        for (int i = 0; i < dataWifi.length(); i++)
         {
-            countBreakData++;
-            continue;
-        }
+            if (dataWifi[i] == '|')
+            {
+                countBreakData++;
+                continue;
+            }
 
-        if (countBreakData == 0)
-        {
-            ssid += dataWifi[i];
-        }
-        else if (countBreakData == 1)
-        {
-            pass += dataWifi[i];
+            if (countBreakData == 0)
+            {
+                ssid += dataWifi[i];
+            }
+            else if (countBreakData == 1)
+            {
+                pass += dataWifi[i];
+            }
         }
     }
 
@@ -263,7 +279,7 @@ void startWifiAP()
       }
       Serial.println("Data Wifi: " + dataWifi);
       writeFile(SPIFFS, wifiPath, dataWifi.c_str());
-      request->send(200, "text/plain", "Done. ESP will restart, connect to your router and go to IP address: " + ip);
+      request->send(200, "text/plain", "Done. ESP will restart, please waiting esp reconnect to new wifi.");
       delay(3000);
       ESP.restart(); });
     server.begin();
@@ -287,6 +303,7 @@ void initRTC()
     if (!rtc.begin(&i2cBus))
     {
         Serial.println("Couldn't find RTC");
+        listHasError[RTC] = true;
     }
 
     if (!rtc.isrunning())
@@ -305,6 +322,50 @@ void initDateTime()
     }
 }
 
+void displayErrorInit()
+{
+    display.clearDisplay();
+    display.setTextColor(WHITE);
+    display.setTextSize(1);
+    display.setCursor(0, 0);
+    display.print("ERROR: ");
+
+    uint8_t positionAtY = 10;
+    if (listHasError[FS])
+    {
+        display.setCursor(0, positionAtY);
+        display.print("SPIFFS mounted failed");
+        positionAtY += 10;
+    }
+    if (listHasError[I2C])
+    {
+        display.setCursor(0, positionAtY);
+        display.print("I2C not found");
+        positionAtY += 10;
+    }
+    if (listHasError[OLED])
+    {
+        display.setCursor(0, positionAtY);
+        display.print("SSD1306 not found");
+        positionAtY += 10;
+    }
+    if (listHasError[RTC])
+    {
+        display.setCursor(0, positionAtY);
+        display.print("RTC not found");
+        positionAtY += 10;
+    }
+    if (listHasError[JOYSTICK])
+    {
+        display.setCursor(0, positionAtY);
+        display.print("ADS1115 not found");
+        positionAtY += 10;
+    }
+
+    display.display();
+    delay(5000);
+}
+
 void drawIconWifi(uint8_t x, uint8_t y)
 {
     if (wifiCheck == true)
@@ -312,6 +373,7 @@ void drawIconWifi(uint8_t x, uint8_t y)
         display.drawBitmap(x, y, IconWifi, 13, 10, WHITE);
     }
 }
+
 void drawIconAlarm(uint8_t x, uint8_t y)
 {
     if (alarmCheck == true)
@@ -319,6 +381,7 @@ void drawIconAlarm(uint8_t x, uint8_t y)
         display.drawBitmap(x, y, IconClock, 13, 10, WHITE);
     }
 }
+
 void drawIconLockScreen(uint8_t x, uint8_t y)
 {
     if (lockScreenCheck == true)
@@ -394,7 +457,7 @@ void displayWeather()
 
     // Display Date and Time on OLED display
     display.clearDisplay();
-
+    drawIconLockScreen(0, 0);
     display.setTextColor(WHITE);
     display.setTextSize(2);
     display.setCursor(18, 0);
@@ -442,18 +505,26 @@ void displayMessage()
     drawIconLockScreen(60, 0);
     drawTimeSmall(95, 0);
 
-    display.setTextColor(WHITE);
     display.setTextSize(1);
+    display.setTextWrap(true);
+    display.setTextColor(WHITE);
 
     for (uint8_t i = 0; i < TOTAL_MESSAGE; i++)
     {
         uint8_t positionAt = (i + 1) * 16;
-        display.drawBitmap(0, positionAt, IconMailChecked, 7, 10, BLACK, WHITE);
+        if (storeMessageChecked[i] == 1)
+        {
+            display.drawBitmap(0, positionAt, IconMailChecked, 7, 10, BLACK, WHITE);
+        }
+        else
+        {
+            display.drawBitmap(0, positionAt, IconMailUnChecked, 7, 10, BLACK, WHITE);
+        }
         display.setCursor(10, positionAt);
         display.print(bufferMsg[i]);
     }
 
-    // display.startscrollright(5, 7);
+    handlerReadMessage();
 
     display.display();
 }
@@ -463,29 +534,48 @@ void displaySetAlarm()
     char bufferHour[10] = {'\0'};
     char bufferMin[10] = {'\0'};
 
-    if (setMinuteAlarm < 10)
-        sprintf(bufferMin, "0%d", setMinuteAlarm);
+    if (setMinuteAlarmTemp < 10)
+        sprintf(bufferMin, "0%d", setMinuteAlarmTemp);
     else
-        sprintf(bufferMin, "%d", setMinuteAlarm);
+        sprintf(bufferMin, "%d", setMinuteAlarmTemp);
 
-    if (setHourAlarm < 10)
-        sprintf(bufferHour, "0%d", setHourAlarm);
+    if (setHourAlarmTemp < 10)
+        sprintf(bufferHour, "0%d", setHourAlarmTemp);
     else
-        sprintf(bufferHour, "%d", setHourAlarm);
+        sprintf(bufferHour, "%d", setHourAlarmTemp);
 
     display.clearDisplay();
+    drawIconLockScreen(60, 0);
     display.setTextSize(3);
     display.setTextColor(WHITE);
-    display.setCursor(25, 16);
+    display.setCursor(20, 16);
     display.print(bufferHour);
     display.print(":");
     display.print(bufferMin);
+
+    drawIconAlarm(25, 52);
+    display.setCursor(40, 55);
+    display.setTextColor(WHITE);
+    display.setTextSize(1);
+    display.print(setHourAlarm);
+    display.print(":");
+    display.print(setMinuteAlarm);
+    display.print(" ");
+
+    setDayAlarm = setDayAlarm == 0 ? timeinfo.tm_mday : setDayAlarm;
+    display.print(setDayAlarm);
+
+    display.print("/");
+    display.print(timeinfo.tm_mon + 1);
+
     display.display();
+
+    handlerSetAlarm();
 }
 
 void displayRingAlarm()
 {
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < 20; i++)
     {
         for (int j = 0; j < 3; j++)
         {
@@ -499,11 +589,51 @@ void displayRingAlarm()
 
 void updateScreen()
 {
-    if (millis() - lastTime > 10000 && !lockScreenCheck)
+    ButtonState joystickButtonState = buttonReadState();
+    if (joystickButtonState == PRESSED_LONG)
+    {
+        lockScreenCheck = !lockScreenCheck;
+        Serial.print("Press long, lockScreenCheck = ");
+        Serial.println(lockScreenCheck);
+        lastTime = millis();
+    }
+
+    if (!lockScreenCheck)
+    {
+        JoystickAxisState joystickAxisState = joystickAxisReadState();
+        switch (joystickAxisState)
+        {
+        case AXIS_LEFT:
+            screenIndex--;
+            if (screenIndex < 0)
+            {
+                screenIndex = (TOTAL_SCREEN - 1) - 1;
+            }
+            lastTime = millis();
+            delay(200);
+            break;
+
+        case AXIS_RIGHT:
+            screenIndex++;
+            if (screenIndex >= (TOTAL_SCREEN - 1))
+            {
+                screenIndex = 0;
+            }
+            lastTime = millis();
+            delay(200);
+            break;
+
+        case AXIS_CENTER:
+        default:
+            break;
+        }
+    }
+
+    if (millis() - lastTime > timeAutoUpdateScreen && !lockScreenCheck)
     {
         lastTime = millis();
         screenIndex++;
-        if (screenIndex >= TOTAL_SCREEN)
+        if (screenIndex >= (TOTAL_SCREEN - 1)) // -1 because last screen is ring alarm
         {
             screenIndex = 0;
         }
@@ -524,7 +654,7 @@ void updateScreen()
         displaySetAlarm();
         break;
     case RING_ALARM:
-        displayRingAlarm();
+        // displayRingAlarm();
         break;
     default:
         displayMain();
@@ -560,6 +690,18 @@ void reCheckWifi()
             WiFi.begin(SSID, PASS);
             ESP.restart();
         }
+    }
+}
+
+void reCheckAlarm()
+{
+    if (alarmCheck && setDayAlarm == timeinfo.tm_mday && setHourAlarm == timeinfo.tm_hour && setMinuteAlarm == timeinfo.tm_min)
+    {
+        digitalWrite(LED_PIN, HIGH);
+        displayRingAlarm();
+        digitalWrite(LED_PIN, LOW);
+
+        alarmCheck = false;
     }
 }
 
@@ -613,6 +755,191 @@ void IRAM_ATTR setupWifiHandler()
     }
 }
 
-void setupAlarmCheck()
+void handlerSetAlarm()
 {
+    if (!lockScreenCheck)
+        return;
+
+    ButtonState joystickButtonState = buttonReadState();
+    JoystickAxisState joystickAxisSate = joystickAxisReadState();
+
+    if (joystickButtonState == PRESSED_SHORT)
+    {
+        setDayAlarm = timeinfo.tm_mday;
+        setHourAlarm = timeinfo.tm_hour + setHourAlarmTemp;
+        setMinuteAlarm = timeinfo.tm_min + setMinuteAlarmTemp;
+        if (setMinuteAlarm >= 60)
+        {
+            setMinuteAlarm -= 60;
+            setHourAlarm++;
+        }
+        if (setHourAlarm >= 24)
+        {
+            setHourAlarm -= 24;
+            setDayAlarm++;
+        }
+
+        Serial.println("Set Alarm");
+        Serial.print("Day: ");
+        Serial.println(setDayAlarm);
+        Serial.print("Hour: ");
+        Serial.println(setHourAlarm);
+        Serial.print("Minute: ");
+        Serial.println(setMinuteAlarm);
+
+        alarmCheck = true;
+
+        display.setTextSize(1);
+        display.setCursor(100, 0);
+        display.print("OK");
+        display.display();
+    }
+
+    switch (joystickAxisSate)
+    {
+    case AXIS_LEFT:
+        setAlarmIndex++;
+        if (setAlarmIndex > 1)
+        {
+            setAlarmIndex = 0;
+        }
+
+        lastTime = millis();
+        delay(200);
+        break;
+
+    case AXIS_RIGHT:
+        setAlarmIndex--;
+        if (setAlarmIndex < 0)
+        {
+            setAlarmIndex = 1;
+        }
+
+        lastTime = millis();
+        delay(200);
+        break;
+
+    default:
+        break;
+    }
+
+    if (setAlarmIndex == 0)
+    {
+        switch (joystickAxisSate)
+        {
+        case AXIS_UP:
+            setHourAlarmTemp++;
+            if (setHourAlarmTemp > 23)
+            {
+                setHourAlarmTemp = 0;
+            }
+            lastTime = millis();
+            delay(50);
+            break;
+
+        case AXIS_DOWN:
+            setHourAlarmTemp--;
+            if (setHourAlarmTemp < 0)
+            {
+                setHourAlarmTemp = 23;
+            }
+            lastTime = millis();
+            delay(50);
+            break;
+
+        default:
+            break;
+        }
+
+        display.setTextSize(3);
+        display.setTextColor(WHITE);
+        display.setCursor(20, 37);
+        display.print("--");
+        display.setCursor(73, 37);
+        display.print("  ");
+        display.display();
+        delay(50);
+        display.setCursor(25, 37);
+        display.print("  ");
+    }
+    else if (setAlarmIndex == 1)
+    {
+        switch (joystickAxisSate)
+        {
+        case AXIS_UP:
+            setMinuteAlarmTemp++;
+            if (setMinuteAlarmTemp > 59)
+            {
+                setMinuteAlarmTemp = 0;
+            }
+            lastTime = millis();
+            delay(50);
+            break;
+
+        case AXIS_DOWN:
+            setMinuteAlarmTemp--;
+            if (setMinuteAlarmTemp < 0)
+            {
+                setMinuteAlarmTemp = 59;
+            }
+            lastTime = millis();
+            delay(50);
+            break;
+
+        default:
+            break;
+        }
+
+        display.setTextSize(3);
+        display.setTextColor(WHITE);
+        display.setCursor(20, 37);
+        display.print("   ");
+        display.setCursor(73, 37);
+        display.print("--");
+        display.display();
+        delay(50);
+        display.setCursor(73, 37);
+        display.print("  ");
+    }
+}
+
+void handlerReadMessage()
+{
+    if (!lockScreenCheck)
+        return;
+
+    JoystickAxisState joystickAxisSate = joystickAxisReadState();
+
+    switch (joystickAxisSate)
+    {
+    case AXIS_DOWN:
+        messageIndex++;
+        storeMessageChecked[messageIndex] = 1;
+        if (messageIndex > TOTAL_MESSAGE - 1)
+        {
+            messageIndex = 0;
+        }
+        delay(200);
+        break;
+
+    case AXIS_UP:
+        messageIndex--;
+        storeMessageChecked[messageIndex] = 1;
+        if (messageIndex < 0)
+        {
+            messageIndex = TOTAL_MESSAGE - 1;
+        }
+        delay(200);
+        break;
+    case AXIS_CENTER:
+    default:
+        storeMessageChecked[messageIndex] = 1;
+        break;
+    }
+
+    uint8_t positionAt = (messageIndex + 1) * 16;
+    display.drawBitmap(0, positionAt, IconMailChecked, 7, 10, BLACK, WHITE);
+    display.setTextColor(BLACK, WHITE);
+    display.setCursor(10, positionAt);
+    display.print(bufferMsg[messageIndex]);
 }

@@ -5,9 +5,9 @@
 
 typedef enum
 {
-    BUTTON_TYPE_NONE = 0x00,
-    BUTTON_TYPE_SHORT = 0x01,
-    BUTTON_TYPE_LONG = 0x02,
+    PRESSED_NONE = 0x00,
+    PRESSED_SHORT = 0x01,
+    PRESSED_LONG = 0x02,
 } ButtonState;
 
 void buttonSetup(uint8_t buttonPin);

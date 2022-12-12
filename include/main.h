@@ -22,6 +22,7 @@
 #define SW_PIN 2
 
 #define BUTTON_PIN 16
+#define LED_PIN 4
 
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
@@ -29,6 +30,15 @@
 
 #define TOTAL_SCREEN 5
 #define TOTAL_MESSAGE 3
+
+typedef enum
+{
+    FS,
+    I2C,
+    OLED,
+    RTC,
+    JOYSTICK
+} ERROR_INIT;
 
 // typedef enum screen: main, message, local time
 typedef enum
@@ -55,12 +65,13 @@ const char *PARAM_INPUT_4 = "gateway";
 
 String ssid;
 String pass;
-String ip;
-String gateway;
 String dataWifi;
 
+uint8_t setDayAlarm = 0;
 uint8_t setHourAlarm = 0;
-uint8_t setMinuteAlarm = 5;
+uint8_t setMinuteAlarm = 0;
+int8_t setHourAlarmTemp = setHourAlarm;
+int8_t setMinuteAlarmTemp = setMinuteAlarm;
 
 const char *ssidPath = "/ssid.txt";
 const char *passPath = "/pass.txt";
@@ -77,6 +88,8 @@ void initSPIFFS();
 void startWifiAP();
 void IRAM_ATTR setupWifiHandler();
 
+void displayErrorInit();
+
 void drawIconWifi(uint8_t x, uint8_t y);
 void drawIconAlarm(uint8_t x, uint8_t y);
 void drawIconLockScreen(uint8_t x, uint8_t y);
@@ -91,7 +104,10 @@ void displayRingAlarm();
 void updateScreen();
 void updateTime();
 void reCheckWifi();
-void setupAlarmCheck();
+void reCheckAlarm();
+
+void handlerSetAlarm();
+void handlerReadMessage();
 
 String readFile(fs::FS &fs, const char *path);
 void writeFile(fs::FS &fs, const char *path, const char *message);
