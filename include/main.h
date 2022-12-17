@@ -8,9 +8,15 @@
 #include <RTClib.h>
 #include <ESPAsyncWebServer.h>
 #include <AsyncTCP.h>
+#include <SocketIoClient.h>
+
 #include "SPIFFS.h"
 #include "time.h"
 #include "Icons.h"
+#include "base64.h"
+#include "esp_camera.h"
+#define CAMERA_MODEL_AI_THINKER // Has PSRAM
+#include "camera_pins.h"
 
 #define BAUD_RATE 115200
 
@@ -52,6 +58,8 @@ typedef enum
 
 const char *SSID = "Nha Bat On";
 const char *PASS = "chochimancut";
+const char *HOST = "192.168.1.26";
+const int PORT = 8080;
 
 const char *ntpServer = "pool.ntp.org";
 const long gmtOffset_sec = 7 * 60 * 60;
@@ -111,6 +119,14 @@ void handlerReadMessage();
 
 String readFile(fs::FS &fs, const char *path);
 void writeFile(fs::FS &fs, const char *path, const char *message);
+
+void configureCamera();
+String convertToBase64(char *bufferChar, int bufferCharLen);
+void socket_onEvent(const char *payload, size_t length);
+void socket_onTimestamp(const char *payload, size_t length);
+void socket_onMessage(const char *payload, size_t length);
+
+String urlencode(String str);
 
 const char index_html[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
