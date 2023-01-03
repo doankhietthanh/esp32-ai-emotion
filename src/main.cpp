@@ -7,6 +7,9 @@ TwoWire i2cBus = TwoWire(0);
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &i2cBus);
 RTC_DS1307 rtc;
 
+String cameraId = "";
+String emotion = "";
+
 IPAddress localIP;
 IPAddress localGateway;
 IPAddress subnet(255, 255, 0, 0);
@@ -42,14 +45,13 @@ int8_t messageIndex = 0;
 void setup()
 {
     Serial.begin(BAUD_RATE);
+
     configureCamera();
-    // pinMode(LED_PIN, OUTPUT);
-    // digitalWrite(LED_PIN, LOW);
 
     initSPIFFS();
     initI2C();
     initOLed();
-    if (!initWifi() && setupWifiState)
+    if (!initWifi())
     {
         startWifiAP();
     }
@@ -58,39 +60,25 @@ void setup()
     joystickSetup(VRx_PIN, VRy_PIN, SW_PIN);
     displayErrorInit();
 
-    socketIo.on("event", socket_onEvent);
-    socketIo.on("timestamp", socket_onTimestamp);
+    socketIo.on("alarm", socket_onAlarm);
+    socketIo.on("message", socket_onMessage);
+    socketIo.on("emotion", socket_onEmotion);
+    socketIo.begin(HOST, PORT, "/socket.io/?transport=websocket");
 
-    socketIo.begin(HOST, PORT);
-
-    // pinMode(BUTTON_PIN, INPUT_PULLUP);
+    Serial.println("Setup done");
 }
 
 void loop()
 {
+    socketIo.loop();
+
     updateTime();
     joystickLoop();
     updateScreen();
     reCheckWifi();
     reCheckAlarm();
 
-    socketIo.loop();
-    socketIo.on("message", socket_onEvent);
-    camera_fb_t *fb = NULL;
-    fb = esp_camera_fb_get();
-    if (!fb)
-    {
-        Serial.println("Camera capture failed");
-        return;
-    }
-    if (millis() - currentMillis > 10000)
-    {
-        currentMillis = millis();
-        socketIo.on("message", socket_onMessage);
-        String bufferBase64 = convertToBase64((char *)fb->buf, fb->len);
-        socketIo.emit("image", (char *)bufferBase64.c_str());
-    }
-    esp_camera_fb_return(fb);
+    sendImageToServer(&currentMillis, timeCaptureDelay);
 }
 
 void initSPIFFS()
@@ -137,6 +125,12 @@ bool initWifi()
     display.clearDisplay();
     display.setTextColor(WHITE);
     display.setTextSize(1);
+
+    if (cameraId == "")
+    {
+        cameraId = readFile(SPIFFS, "/camera.txt");
+        Serial.println(cameraId);
+    }
 
     if (ssid == "" || pass == "")
     {
@@ -237,7 +231,7 @@ bool initWifi()
         display.display();
         delay(2000); // Pause for 2 seconds
         int countDown = 5;
-        attachInterrupt(BUTTON_PIN, setupWifiHandler, RISING);
+        // attachInterrupt(SW_PIN, setupWifiHandler, RISING);
         while (countDown > 0)
         {
             display.clearDisplay();
@@ -255,6 +249,7 @@ bool initWifi()
         return false;
     }
 }
+
 void startWifiAP()
 {
     Serial.println("Setting AP (Access Point)");
@@ -289,7 +284,7 @@ void startWifiAP()
             Serial.println(ssid);
             dataWifi += ssid;
             // Write file to save value
-            writeFile(SPIFFS, ssidPath, ssid.c_str());
+            //writeFile(SPIFFS, ssidPath, ssid.c_str());
           }
           // HTTP POST pass value
           if (p->name() == PARAM_INPUT_2) {
@@ -298,7 +293,17 @@ void startWifiAP()
             Serial.println(pass);
             dataWifi += pass;
             // Write file to save value
-            writeFile(SPIFFS, passPath, pass.c_str());
+            //writeFile(SPIFFS, passPath, pass.c_str());
+          }
+
+          if(p->name() == PARAM_INPUT_3){
+            String newCameraId = p->value().c_str();
+            if(newCameraId != ""){
+              cameraId = newCameraId;
+            }
+            Serial.print("Camera ID set to: ");
+            Serial.println(cameraId);
+            writeFile(SPIFFS, cameraPath, cameraId.c_str());
           }
         }
 
@@ -390,7 +395,7 @@ void displayErrorInit()
     }
 
     display.display();
-    delay(5000);
+    delay(3000);
 }
 
 void drawIconWifi(uint8_t x, uint8_t y)
@@ -519,6 +524,12 @@ void displayMain()
     drawIconAlarm(15, 0);
     drawIconLockScreen(60, 0);
     drawTimeSmall(95, 0);
+
+    display.setTextSize(2);
+    display.setTextColor(WHITE);
+    display.setCursor(30, 40);
+
+    display.print(emotion);
 
     display.display();
 }
@@ -776,9 +787,12 @@ void writeFile(fs::FS &fs, const char *path, const char *message)
 
 void IRAM_ATTR setupWifiHandler()
 {
-    if (digitalRead(BUTTON_PIN) == 1)
+    Serial.println("Checked setup Wifi Handler");
+    if (digitalRead(SW_PIN) == 1)
     {
         setupWifiState = wifiCheck ? false : true;
+        Serial.print("Setup Wifi State = ");
+        Serial.println(setupWifiState);
     }
 }
 
@@ -795,6 +809,7 @@ void handlerSetAlarm()
         setDayAlarm = timeinfo.tm_mday;
         setHourAlarm = timeinfo.tm_hour + setHourAlarmTemp;
         setMinuteAlarm = timeinfo.tm_min + setMinuteAlarmTemp;
+
         if (setMinuteAlarm >= 60)
         {
             setMinuteAlarm -= 60;
@@ -814,12 +829,20 @@ void handlerSetAlarm()
         Serial.print("Minute: ");
         Serial.println(setMinuteAlarm);
 
-        alarmCheck = true;
-
         display.setTextSize(1);
         display.setCursor(100, 0);
         display.print("OK");
         display.display();
+
+        // get timestamp from alarm
+        alarmCheck = true;
+        tm timeNow = timeinfo;
+        timeNow.tm_hour = setHourAlarm;
+        timeNow.tm_min = setMinuteAlarm;
+        timeNow.tm_sec = 0;
+        timeNow.tm_mday = setDayAlarm;
+        time_t timestamp = mktime(&timeNow);
+        sendAlarmToServer(timestamp);
     }
 
     switch (joystickAxisSate)
@@ -1034,6 +1057,7 @@ void configureCamera()
     }
 
     sensor_t *s = esp_camera_sensor_get();
+    s->set_vflip(s, 1);
     // initial sensors are flipped vertically and colors are a bit saturated
     if (s->id.PID == OV3660_PID)
     {
@@ -1060,7 +1084,7 @@ String convertToBase64(char *bufferBin, int bufferCharLen)
             bufferBase64 += urlencode(String(output));
     }
 
-    bufferBase64 = "\"" + bufferBase64 + "\"";
+    // bufferBase64 = "\"" + bufferBase64 + "\"";
 
     return bufferBase64;
 }
@@ -1107,17 +1131,137 @@ String urlencode(String str)
     return encodedString;
 }
 
-void socket_onEvent(const char *payload, size_t length)
+void socket_onAlarm(const char *payload, size_t length)
 {
-    Serial.printf("got message: %s\n", payload);
+    Serial.printf("got alarm: %s\n", payload);
+    alarmCheck = getAlarmFromServer(payload, length);
 }
 
-void socket_onTimestamp(const char *payload, size_t length)
+void socket_onEmotion(const char *payload, size_t length)
 {
-    Serial.printf("Timestamp: %s\n", payload);
+    Serial.printf("got emotion: %s\n", payload);
+    switch (getEmotionFromServer(payload, length))
+    {
+    case 0:
+        emotion = "Angry";
+        break;
+    case 1:
+        emotion = "Disgust";
+        break;
+    case 2:
+        emotion = "Fear";
+        break;
+    case 3:
+        emotion = "Happy";
+        break;
+    case 4:
+        emotion = "Sad";
+        break;
+    case 5:
+        emotion = "Surprise";
+        break;
+    case 6:
+        emotion = "Neutral";
+        break;
+    default:
+        emotion = "Neutral";
+        break;
+    }
 }
 
 void socket_onMessage(const char *payload, size_t length)
 {
-    Serial.printf("Message: %s\n", payload);
+    Serial.printf("got message: %s\n", payload);
+    String message = getMessageFromServer(payload, length);
+    strcpy(bufferMsg[0], message.c_str());
+}
+
+void sendImageToServer(unsigned long *timeCurrent, int timeDelay)
+{
+    camera_fb_t *fb = NULL;
+    fb = esp_camera_fb_get();
+    if (!fb)
+    {
+        Serial.println("Camera capture failed");
+        return;
+    }
+    if (millis() - *timeCurrent > timeDelay)
+    {
+        *timeCurrent = millis();
+
+        String bufferBase64 = convertToBase64((char *)fb->buf, fb->len);
+        String jsonObjectImage = "{\"camera_id\":\"" + cameraId + "\",\"data\":\"" + bufferBase64 + "\"}";
+        socketIo.emit("image", (char *)jsonObjectImage.c_str());
+    }
+    esp_camera_fb_return(fb);
+}
+
+void sendAlarmToServer(unsigned long alarmTimestamp)
+{
+    String jsonObjectAlarm = "{\"camera_id\":\"" + cameraId + "\",\"alarm_at\":" + alarmTimestamp + ",\"alarm_status\":" + alarmCheck + "}";
+    socketIo.emit("alarm", (char *)jsonObjectAlarm.c_str());
+}
+
+bool getAlarmFromServer(const char *data, size_t length)
+{
+    StaticJsonDocument<200> doc;
+    deserializeJson(doc, data);
+    String id = doc["camera_id"];
+    String alarmAt = doc["alarm_at"];
+    bool status = doc["alarm_status"];
+
+    if (id != cameraId)
+        return false;
+
+    if (status)
+    {
+        time_t timestamp;
+        if (alarmAt.length() > 10)
+        {
+            timestamp = atof(alarmAt.c_str()) / 1000;
+        }
+        else
+        {
+            timestamp = atol(alarmAt.c_str());
+        }
+
+        tm timeSet;
+        localtime_r(&timestamp, &timeSet);
+
+        char buffer[20];
+        strftime(buffer, 20, "%d/%m/%Y %H:%M:%S", &timeSet);
+        setHourAlarm = timeSet.tm_hour;
+        setMinuteAlarm = timeSet.tm_min;
+        setDayAlarm = timeSet.tm_mday;
+        Serial.println("Alarm is on at " + String(buffer));
+
+        return true;
+    }
+    else
+    {
+        Serial.println("Alarm is off");
+        return false;
+    }
+}
+
+int getEmotionFromServer(const char *data, size_t length)
+{
+    StaticJsonDocument<200> doc;
+    deserializeJson(doc, data);
+    String id = doc["camera_id"];
+    int emotion = doc["emotion"];
+    if (id != cameraId)
+        return 0;
+    return emotion;
+}
+
+String getMessageFromServer(const char *data, size_t length)
+{
+    StaticJsonDocument<200> doc;
+    deserializeJson(doc, data);
+    String id = doc["camera_id"];
+    String message = doc["message"];
+    if (id != cameraId)
+        return "";
+    return message;
 }

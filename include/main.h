@@ -9,6 +9,7 @@
 #include <ESPAsyncWebServer.h>
 #include <AsyncTCP.h>
 #include <SocketIoClient.h>
+#include <ArduinoJson.h>
 
 #include "SPIFFS.h"
 #include "time.h"
@@ -27,8 +28,8 @@
 #define VRy_PIN 1
 #define SW_PIN 2
 
-#define BUTTON_PIN 16
-#define LED_PIN 4
+// #define BUTTON_PIN 2
+// #define LED_PIN 4
 
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
@@ -56,20 +57,26 @@ typedef enum
     RING_ALARM,
 } screenType;
 
+// const char *SSID = "NguyenVanTai";
+// const char *PASS = "19071953tai";
 const char *SSID = "Nha Bat On";
 const char *PASS = "chochimancut";
-const char *HOST = "192.168.1.26";
-const int PORT = 8080;
+// const char *HOST = "be.giamgialab.com";
+// const int PORT = 443;
+// const char *HOST = "be.uilabs.store";
+// const int PORT = 443;
+const char *HOST = "192.168.1.16";
+const int PORT = 3000;
 
 const char *ntpServer = "pool.ntp.org";
 const long gmtOffset_sec = 7 * 60 * 60;
 const int daylightOffset_sec = 3600;
+const unsigned long timeCaptureDelay = 15000;
 
 // Search for parameter in HTTP POST request
 const char *PARAM_INPUT_1 = "ssid";
 const char *PARAM_INPUT_2 = "pass";
-const char *PARAM_INPUT_3 = "ip";
-const char *PARAM_INPUT_4 = "gateway";
+const char *PARAM_INPUT_3 = "camera_id";
 
 String ssid;
 String pass;
@@ -81,11 +88,12 @@ uint8_t setMinuteAlarm = 0;
 int8_t setHourAlarmTemp = setHourAlarm;
 int8_t setMinuteAlarmTemp = setMinuteAlarm;
 
-const char *ssidPath = "/ssid.txt";
-const char *passPath = "/pass.txt";
-const char *ipPath = "/ip.txt";
-const char *gatewayPath = "/gateway.txt";
+// const char *ssidPath = "/ssid.txt";
+// const char *passPath = "/pass.txt";
+// const char *ipPath = "/ip.txt";
+// const char *gatewayPath = "/gateway.txt";
 const char *wifiPath = "/wifi.txt";
+const char *cameraPath = "/camera.txt";
 
 bool initWifi();
 void initI2C();
@@ -122,9 +130,16 @@ void writeFile(fs::FS &fs, const char *path, const char *message);
 
 void configureCamera();
 String convertToBase64(char *bufferChar, int bufferCharLen);
-void socket_onEvent(const char *payload, size_t length);
-void socket_onTimestamp(const char *payload, size_t length);
+
+void socket_onAlarm(const char *payload, size_t length);
+void socket_onEmotion(const char *payload, size_t length);
 void socket_onMessage(const char *payload, size_t length);
+
+void sendImageToServer(unsigned long *timeCurrent, int timeDelay);
+void sendAlarmToServer(unsigned long timestamp);
+bool getAlarmFromServer(const char *data, size_t length);
+int getEmotionFromServer(const char *data, size_t length);
+String getMessageFromServer(const char *data, size_t length);
 
 String urlencode(String str);
 
@@ -269,8 +284,13 @@ const char index_html[] PROGMEM = R"rawliteral(
                     <p>
                         <label for="ssid">SSID</label>
                         <input type="text" id="ssid" name="ssid" value="Nha Bat On"><br>
+
                         <label for="pass">Password</label>
                         <input type="text" id="pass" name="pass" value="chochimancut"><br>
+
+                        <label for="camera_id">Camera ID</label>
+                        <input type="text" id="camera_id" name="camera_id" placeholder="Please change when set up new Camera"><br>
+                        
                         <input type="submit" value="Submit">
                     </p>
                 </form>
